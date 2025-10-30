@@ -4,11 +4,10 @@ class CollaborativeWhiteboard {
         this.canvas = document.getElementById('drawingCanvas');
         this.ctx = this.canvas.getContext('2d');
         this.isDrawing = false;
-        this.lastX = 0;
-        this.lastY = 0;
         this.currentColor = '#000000';
         this.currentLineWidth = 3;
         this.username = null;
+        this.currentStroke = null;
         
         this.initializeApp();
         this.setupEventListeners();
@@ -17,7 +16,6 @@ class CollaborativeWhiteboard {
     }
     
     initializeApp() {
-        // Mostrar modal de bienvenida
         const welcomeModal = document.getElementById('welcomeModal');
         const usernameForm = document.getElementById('usernameForm');
         
@@ -34,23 +32,19 @@ class CollaborativeWhiteboard {
             }
         });
         
-        // Enfocar input de usuario al cargar
         document.getElementById('usernameInput').focus();
     }
     
     setupEventListeners() {
-        // Eventos del canvas
         this.canvas.addEventListener('mousedown', this.startDrawing.bind(this));
         this.canvas.addEventListener('mousemove', this.draw.bind(this));
         this.canvas.addEventListener('mouseup', this.stopDrawing.bind(this));
         this.canvas.addEventListener('mouseout', this.stopDrawing.bind(this));
         
-        // Eventos táctiles
         this.canvas.addEventListener('touchstart', this.handleTouchStart.bind(this));
         this.canvas.addEventListener('touchmove', this.handleTouchMove.bind(this));
         this.canvas.addEventListener('touchend', this.stopDrawing.bind(this));
         
-        // Herramientas de dibujo
         document.getElementById('colorPicker').addEventListener('input', (e) => {
             this.currentColor = e.target.value;
         });
@@ -60,14 +54,12 @@ class CollaborativeWhiteboard {
             document.getElementById('brushSizeValue').textContent = `${e.target.value}px`;
         });
         
-        // Botón limpiar
         document.getElementById('clearBtn').addEventListener('click', () => {
             if (confirm('¿Estás seguro de que quieres limpiar toda la pizarra?')) {
                 this.socket.emit('clear-canvas');
             }
         });
         
-        // Chat
         document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
         document.getElementById('messageInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
@@ -75,19 +67,24 @@ class CollaborativeWhiteboard {
             }
         });
         
-        // Redimensionar canvas cuando cambia el tamaño de la ventana
         window.addEventListener('resize', () => this.resizeCanvas());
     }
     
     setupSocketEvents() {
-        // Eventos de dibujo
-        this.socket.on('draw', (data) => {
-            this.drawOnCanvas(data);
+        // 🔥 NUEVOS EVENTOS PARA TRAZOS COMPLETOS
+        this.socket.on('draw-start', (stroke) => {
+            this.drawRemoteStrokeStart(stroke);
+        });
+        
+        this.socket.on('draw-move', (data) => {
+            this.drawRemoteStrokeMove(data);
         });
         
         this.socket.on('canvas-state', (state) => {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            state.forEach(data => this.drawOnCanvas(data));
+            state.forEach(stroke => {
+                this.drawCompleteStroke(stroke);
+            });
         });
         
         this.socket.on('clear-canvas', (data) => {
@@ -95,7 +92,6 @@ class CollaborativeWhiteboard {
             this.addSystemMessage(`${data.username} limpió la pizarra`, data.timestamp);
         });
         
-        // Eventos de chat
         this.socket.on('chat-message', (data) => {
             this.addChatMessage(data);
         });
@@ -112,42 +108,45 @@ class CollaborativeWhiteboard {
             this.updateUserCount(data);
         });
         
-        // Manejo de reconexión
         this.socket.on('connect', () => {
             console.log('Conectado al servidor');
             if (this.username) {
                 this.socket.emit('set-username', this.username);
             }
         });
-        
-        this.socket.on('disconnect', () => {
-            console.log('Desconectado del servidor');
-        });
     }
     
     resizeCanvas() {
         const container = this.canvas.parentElement;
-        this.canvas.width = container.clientWidth - 4; // Restar bordes
-        this.canvas.height = container.clientHeight - 100; // Restar espacio de herramientas
+        this.canvas.width = container.clientWidth - 4;
+        this.canvas.height = container.clientHeight - 100;
         
-        // Redibujar estado actual si existe
-        if (this.socket.connected) {
+        // Solicitar estado actual después de redimensionar
+        if (this.socket.connected && this.username) {
             this.socket.emit('request-canvas-state');
         }
     }
     
-    // Métodos de dibujo
+    // 🔥 MÉTODOS DE DIBUJO CORREGIDOS
     startDrawing(e) {
         this.isDrawing = true;
         const pos = this.getMousePos(e);
-        [this.lastX, this.lastY] = [pos.x, pos.y];
         
-        // Emitir inicio del trazo
-        this.socket.emit('draw', {
-            x: this.lastX,
-            y: this.lastY,
-            type: 'start',
-            color: this.currentColor, // Color actual del usuario
+        // Configurar estilo de dibujo
+        this.ctx.strokeStyle = this.currentColor;
+        this.ctx.lineWidth = this.currentLineWidth;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        
+        // Empezar nuevo trazo
+        this.ctx.beginPath();
+        this.ctx.moveTo(pos.x, pos.y);
+        
+        // Enviar inicio de trazo al servidor
+        this.socket.emit('draw-start', {
+            x: pos.x,
+            y: pos.y,
+            color: this.currentColor, // Color original
             lineWidth: this.currentLineWidth
         });
     }
@@ -158,60 +157,64 @@ class CollaborativeWhiteboard {
         e.preventDefault();
         const pos = this.getMousePos(e);
         
-        this.ctx.beginPath();
-        this.ctx.moveTo(this.lastX, this.lastY);
+        // Dibujar localmente
         this.ctx.lineTo(pos.x, pos.y);
-        this.ctx.strokeStyle = this.currentColor;
-        this.ctx.lineWidth = this.currentLineWidth;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
         this.ctx.stroke();
         
-        // Emitir punto de dibujo
-        this.socket.emit('draw', {
+        // Enviar punto al servidor
+        this.socket.emit('draw-move', {
             x: pos.x,
-            y: pos.y,
-            type: 'draw',
-            color: this.currentColor, // Color actual del usuario
-            lineWidth: this.currentLineWidth
+            y: pos.y
         });
-        
-        [this.lastX, this.lastY] = [pos.x, pos.y];
     }
     
     stopDrawing() {
         if (this.isDrawing) {
             this.isDrawing = false;
-            
-            // Emitir fin del trazo
-            this.socket.emit('draw', {
-                x: this.lastX,
-                y: this.lastY,
-                type: 'end',
-                color: this.currentColor, // Color actual del usuario
-                lineWidth: this.currentLineWidth
-            });
+            this.ctx.closePath();
+            this.socket.emit('draw-end');
         }
     }
     
-    // 🔥 FUNCIÓN CORREGIDA: Usar siempre el color original
-    drawOnCanvas(data) {
-        // USAR SIEMPRE EL COLOR ORIGINAL con el que se dibujó
-        const drawColor = data.originalColor || data.color;
+    // 🔥 MÉTODOS PARA DIBUJAR TRAZOS REMOTOS
+    drawRemoteStrokeStart(stroke) {
+        this.ctx.strokeStyle = stroke.color; // Usar color original del trazo
+        this.ctx.lineWidth = stroke.lineWidth;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
         
-        if (data.type === 'start') {
-            this.ctx.beginPath();
-            this.ctx.moveTo(data.x, data.y);
-        } else if (data.type === 'draw') {
-            this.ctx.lineTo(data.x, data.y);
-            this.ctx.strokeStyle = drawColor; // Color original siempre
-            this.ctx.lineWidth = data.lineWidth;
-            this.ctx.lineCap = 'round';
-            this.ctx.lineJoin = 'round';
-            this.ctx.stroke();
-            this.ctx.beginPath();
-            this.ctx.moveTo(data.x, data.y);
+        this.ctx.beginPath();
+        this.ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+    }
+    
+    drawRemoteStrokeMove(data) {
+        this.ctx.strokeStyle = data.color; // Color original del trazo
+        this.ctx.lineWidth = data.lineWidth;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        
+        this.ctx.lineTo(data.point.x, data.point.y);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(data.point.x, data.point.y);
+    }
+    
+    drawCompleteStroke(stroke) {
+        if (stroke.points.length < 2) return;
+        
+        this.ctx.strokeStyle = stroke.color; // Color original siempre
+        this.ctx.lineWidth = stroke.lineWidth;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+        
+        for (let i = 1; i < stroke.points.length; i++) {
+            this.ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
         }
+        
+        this.ctx.stroke();
     }
     
     // Métodos táctiles
@@ -253,7 +256,7 @@ class CollaborativeWhiteboard {
         };
     }
     
-    // Métodos de chat
+    // Métodos de chat (sin cambios)
     sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
@@ -319,7 +322,6 @@ class CollaborativeWhiteboard {
     }
 }
 
-// Inicializar la aplicación cuando se carga la página
 document.addEventListener('DOMContentLoaded', () => {
     new CollaborativeWhiteboard();
 });
