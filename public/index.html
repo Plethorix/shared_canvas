@@ -3,109 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pizarra Colaborativa 🎨 + 💬</title>
-    <meta name="description" content="Pizarra colaborativa en tiempo real con chat para múltiples usuarios">
+    <title>Pizarra Colaborativa con Chat</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header con controles -->
-        <header class="app-header">
-            <div class="header-content">
-                <h1 class="app-title">
-                    <span class="icon">🎨</span>
-                    Pizarra Colaborativa
-                    <span class="chat-icon">💬</span>
-                </h1>
-                
-                <div class="controls-panel">
-                    <!-- Contador de usuarios -->
-                    <div class="users-widget">
-                        <span class="users-icon">👥</span>
-                        <span id="usersCount" class="users-count">0</span>
-                        <span class="users-text">usuarios</span>
-                    </div>
-                    
-                    <!-- Selector de color -->
-                    <div class="color-control">
-                        <label for="colorPicker" class="control-label">Color:</label>
-                        <input type="color" id="colorPicker" value="#ff0000" title="Seleccionar color">
-                    </div>
-                    
-                    <!-- Control de grosor -->
-                    <div class="brush-control">
-                        <label for="brushSize" class="control-label">Grosor:</label>
-                        <input type="range" id="brushSize" min="1" max="20" value="5" class="brush-slider">
-                        <span id="brushSizeValue" class="brush-size">5px</span>
-                    </div>
-                    
-                    <!-- Botón limpiar -->
-                    <button id="clearBtn" class="btn btn-clear" title="Limpiar pizarra">
-                        <span class="btn-icon">🧹</span>
-                        Limpiar
-                    </button>
-                </div>
+    <!-- Modal de bienvenida -->
+    <div id="welcomeModal" class="modal">
+        <div class="modal-content">
+            <h2>¡Bienvenido a la Pizarra Colaborativa!</h2>
+            <p>Ingresa tu nombre de usuario para comenzar:</p>
+            <form id="usernameForm">
+                <input type="text" id="usernameInput" placeholder="Tu nombre de usuario" maxlength="20" required>
+                <button type="submit">Entrar a la Pizarra</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🎨 Pizarra Colaborativa</h1>
+            <div class="user-info">
+                <span id="userCount">0 usuarios conectados</span>
+                <button id="clearBtn" class="btn-clear">🧹 Limpiar Pizarra</button>
             </div>
         </header>
 
-        <!-- Área principal con pizarra y chat -->
+        <!-- Contenido principal -->
         <main class="main-content">
-            <div class="canvas-section">
-                <div class="canvas-container">
-                    <canvas id="pizarra"></canvas>
-                    <div id="loadingMessage" class="loading-message">
-                        <div class="spinner"></div>
-                        <p>Conectando a la pizarra...</p>
+            <!-- Panel de dibujo -->
+            <section class="drawing-panel">
+                <div class="tools">
+                    <div class="color-picker">
+                        <label>Color:</label>
+                        <input type="color" id="colorPicker" value="#000000">
+                    </div>
+                    <div class="brush-size">
+                        <label>Grosor:</label>
+                        <input type="range" id="brushSize" min="1" max="20" value="3">
+                        <span id="brushSizeValue">3px</span>
                     </div>
                 </div>
-            </div>
+                <canvas id="drawingCanvas"></canvas>
+            </section>
 
-            <!-- Sección del chat -->
-            <div class="chat-section">
-                <div class="chat-container">
-                    <div class="chat-header">
-                        <h3>Chat en Vivo</h3>
-                        <div class="online-indicator">
-                            <span class="indicator-dot"></span>
-                            <span id="chatUsersCount">0</span> en línea
-                        </div>
-                    </div>
-                    
-                    <div class="chat-messages" id="chatMessages">
-                        <div class="system-message">
-                            💡 Bienvenido al chat. Escribe un mensaje para comenzar!
-                        </div>
-                    </div>
-                    
-                    <div class="chat-input-container">
-                        <div class="username-input">
-                            <input type="text" id="usernameInput" placeholder="Tu nombre" maxlength="20" value="Usuario">
-                        </div>
-                        <div class="message-input">
-                            <input type="text" id="messageInput" placeholder="Escribe tu mensaje..." maxlength="500">
-                            <button id="sendMessageBtn" class="btn btn-send">
-                                <span class="send-icon">📤</span>
-                            </button>
-                        </div>
-                    </div>
+            <!-- Panel de chat -->
+            <section class="chat-panel">
+                <div class="chat-header">
+                    <h3>💬 Chat en Tiempo Real</h3>
+                    <div id="onlineUsers" class="online-users"></div>
                 </div>
-            </div>
+                <div id="chatMessages" class="chat-messages"></div>
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="Escribe tu mensaje..." maxlength="200">
+                    <button id="sendBtn">Enviar</button>
+                </div>
+            </section>
         </main>
-
-        <!-- Footer con información -->
-        <footer class="app-footer">
-            <div class="footer-content">
-                <p class="footer-text">
-                    💡 <strong>Consejo:</strong> Dibuja y chatea en tiempo real con otros usuarios
-                </p>
-                <div class="connection-status">
-                    <span id="connectionStatus" class="status-connected">● Conectado</span>
-                </div>
-            </div>
-        </footer>
     </div>
 
-    <!-- Scripts -->
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>
 </body>
