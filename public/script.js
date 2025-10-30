@@ -147,7 +147,7 @@ class CollaborativeWhiteboard {
             x: this.lastX,
             y: this.lastY,
             type: 'start',
-            color: this.currentColor,
+            color: this.currentColor, // Color actual del usuario
             lineWidth: this.currentLineWidth
         });
     }
@@ -172,7 +172,7 @@ class CollaborativeWhiteboard {
             x: pos.x,
             y: pos.y,
             type: 'draw',
-            color: this.currentColor,
+            color: this.currentColor, // Color actual del usuario
             lineWidth: this.currentLineWidth
         });
         
@@ -188,19 +188,23 @@ class CollaborativeWhiteboard {
                 x: this.lastX,
                 y: this.lastY,
                 type: 'end',
-                color: this.currentColor,
+                color: this.currentColor, // Color actual del usuario
                 lineWidth: this.currentLineWidth
             });
         }
     }
     
+    // 🔥 FUNCIÓN CORREGIDA: Usar siempre el color original
     drawOnCanvas(data) {
+        // USAR SIEMPRE EL COLOR ORIGINAL con el que se dibujó
+        const drawColor = data.originalColor || data.color;
+        
         if (data.type === 'start') {
             this.ctx.beginPath();
             this.ctx.moveTo(data.x, data.y);
         } else if (data.type === 'draw') {
             this.ctx.lineTo(data.x, data.y);
-            this.ctx.strokeStyle = data.userColor || data.color;
+            this.ctx.strokeStyle = drawColor; // Color original siempre
             this.ctx.lineWidth = data.lineWidth;
             this.ctx.lineCap = 'round';
             this.ctx.lineJoin = 'round';
