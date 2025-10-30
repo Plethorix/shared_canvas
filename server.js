@@ -36,7 +36,7 @@ io.on('connection', (socket) => {
         });
         userCount++;
         
-        // Enviir estado actual del canvas al nuevo usuario
+        // Enviar estado actual del canvas al nuevo usuario
         socket.emit('canvas-state', canvasState);
         
         // Notificar a todos los usuarios sobre el nuevo usuario
@@ -58,18 +58,19 @@ io.on('connection', (socket) => {
         console.log(`Usuario ${username} (${socket.id}) se ha unido`);
     });
     
-    // Manejar eventos de dibujo
+    // Manejar eventos de dibujo - CORREGIDO PARA MANTENER COLORES
     socket.on('draw', (data) => {
         // Validar datos
         if (isValidDrawData(data)) {
-            // Agregar información del usuario
+            // 🔥 CORRECCIÓN: Preservar el color original del dibujo
             const user = users.get(socket.id);
             if (user) {
-                data.userColor = user.color;
+                data.originalColor = data.color; // Guardar color original
                 data.username = user.username;
             }
             
             canvasState.push(data);
+            // Enviar a todos los demás clientes manteniendo el color original
             socket.broadcast.emit('draw', data);
         }
     });
@@ -138,6 +139,12 @@ function isValidDrawData(data) {
         typeof data.lineWidth === 'number'
     );
 }
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Servidor ejecutándose en puerto ${PORT}`);
+    console.log(`Accede a: http://localhost:${PORT}`);
+});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
