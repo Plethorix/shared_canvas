@@ -41,11 +41,16 @@ let canvasState = {
   users: 0
 };
 
+// No almacenamos mensajes del chat en el servidor
+let connectedUsers = new Map();
+
 // Manejo de conexiones Socket.io
 io.on('connection', (socket) => {
   console.log(`✅ Nueva conexión: ${socket.id}`);
   
   canvasState.users++;
+  connectedUsers.set(socket.id, { id: socket.id, connectedAt: new Date() });
+  
   console.log(`👥 Usuarios conectados: ${canvasState.users}`);
   
   // Enviar estado actual al nuevo usuario
@@ -53,6 +58,9 @@ io.on('connection', (socket) => {
   
   // Actualizar contador para todos
   io.emit('users-update', canvasState.users);
+  
+  // Notificar a todos que un nuevo usuario se unió
+  socket.broadcast.emit('user-joined', `Usuario ${canvasState.users} se unió a la pizarra`);
   
   // Manejar dibujo
   socket.on('draw', (lineData) => {
@@ -69,6 +77,19 @@ io.on('connection', (socket) => {
     console.log(`🧹 Canvas limpiado por ${socket.id}`);
   });
   
+  // Manejar mensajes de chat
+  socket.on('chat-message', (messageData) => {
+    // Validar mensaje
+    if (validateMessageData(messageData)) {
+      // Transmitir mensaje a todos los usuarios incluyendo el emisor
+      io.emit('chat-message', {
+        ...messageData,
+        timestamp: new Date().toISOString(),
+        userId: socket.id
+      });
+    }
+  });
+  
   // Manejar ping/pong para mantener conexión
   socket.on('ping', () => {
     socket.emit('pong');
@@ -78,11 +99,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log(`❌ Desconexión: ${socket.id}`);
     canvasState.users = Math.max(0, canvasState.users - 1);
+    connectedUsers.delete(socket.id);
+    
     io.emit('users-update', canvasState.users);
+    socket.broadcast.emit('user-left', `Un usuario abandonó la pizarra`);
   });
 });
 
-// Validación de datos
+// Validación de datos de dibujo
 function validateLineData(lineData) {
   return lineData && 
          Array.isArray(lineData.points) &&
@@ -91,9 +115,19 @@ function validateLineData(lineData) {
          lineData.points.length >= 2;
 }
 
+// Validación de datos de mensaje
+function validateMessageData(messageData) {
+  return messageData && 
+         typeof messageData.text === 'string' &&
+         messageData.text.trim().length > 0 &&
+         messageData.text.length <= 500 && // Límite de caracteres
+         typeof messageData.username === 'string' &&
+         messageData.username.trim().length > 0;
+}
+
 // Iniciar servidor
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor de pizarra colaborativa iniciado`);
+  console.log(`🚀 Servidor de pizarra colaborativa con chat iniciado`);
   console.log(`📍 Puerto: ${PORT}`);
   console.log(`🌐 Modo: ${process.env.NODE_ENV || 'development'}`);
 });
