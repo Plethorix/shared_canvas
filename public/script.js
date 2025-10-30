@@ -1,386 +1,311 @@
-/**
- * Pizarra Colaborativa con Chat
- * Versión completa con funcionalidades de dibujo y chat
- */
-class PizarraColaborativa {
+class CollaborativeWhiteboard {
     constructor() {
-        this.canvas = document.getElementById('pizarra');
+        this.socket = io();
+        this.canvas = document.getElementById('drawingCanvas');
         this.ctx = this.canvas.getContext('2d');
-        this.socket = null;
         this.isDrawing = false;
         this.lastX = 0;
         this.lastY = 0;
-        this.currentColor = '#ff0000';
-        this.brushSize = 5;
-        this.currentLine = [];
-        this.reconnectionAttempts = 0;
-        this.maxReconnectionAttempts = 10;
-        this.username = 'Usuario';
+        this.currentColor = '#000000';
+        this.currentLineWidth = 3;
+        this.username = null;
         
         this.initializeApp();
+        this.setupEventListeners();
+        this.setupSocketEvents();
+        this.resizeCanvas();
     }
     
     initializeApp() {
-        this.setupCanvas();
-        this.setupEventListeners();
-        this.initializeSocket();
-        this.setupUIUpdates();
-        this.setupChat();
+        // Mostrar modal de bienvenida
+        const welcomeModal = document.getElementById('welcomeModal');
+        const usernameForm = document.getElementById('usernameForm');
         
-        console.log('🎨💬 Pizarra colaborativa con chat inicializada');
-    }
-    
-    setupCanvas() {
-        const container = document.querySelector('.canvas-container');
-        const maxWidth = Math.min(800, container.clientWidth - 40);
-        const maxHeight = Math.min(600, window.innerHeight - 300);
+        usernameForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const usernameInput = document.getElementById('usernameInput');
+            const username = usernameInput.value.trim();
+            
+            if (username) {
+                this.username = username;
+                this.socket.emit('set-username', username);
+                welcomeModal.style.display = 'none';
+                this.focusMessageInput();
+            }
+        });
         
-        this.canvas.width = maxWidth;
-        this.canvas.height = maxHeight;
-        
-        this.ctx.lineJoin = 'round';
-        this.ctx.lineCap = 'round';
-        this.ctx.lineWidth = this.brushSize;
-        this.ctx.strokeStyle = this.currentColor;
-        
-        // Fondo blanco
-        this.ctx.fillStyle = 'white';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        // Enfocar input de usuario al cargar
+        document.getElementById('usernameInput').focus();
     }
     
     setupEventListeners() {
-        // Eventos de mouse para dibujo
+        // Eventos del canvas
         this.canvas.addEventListener('mousedown', this.startDrawing.bind(this));
         this.canvas.addEventListener('mousemove', this.draw.bind(this));
         this.canvas.addEventListener('mouseup', this.stopDrawing.bind(this));
         this.canvas.addEventListener('mouseout', this.stopDrawing.bind(this));
         
-        // Eventos táctiles para dibujo
+        // Eventos táctiles
         this.canvas.addEventListener('touchstart', this.handleTouchStart.bind(this));
         this.canvas.addEventListener('touchmove', this.handleTouchMove.bind(this));
         this.canvas.addEventListener('touchend', this.stopDrawing.bind(this));
         
-        // Controles de dibujo
-        document.getElementById('colorPicker').addEventListener('input', this.handleColorChange.bind(this));
-        document.getElementById('brushSize').addEventListener('input', this.handleBrushSizeChange.bind(this));
-        document.getElementById('clearBtn').addEventListener('click', this.handleClearCanvas.bind(this));
-        
-        // Redimensionado
-        window.addEventListener('resize', this.handleResize.bind(this));
-    }
-    
-    setupChat() {
-        // Configurar nombre de usuario
-        const usernameInput = document.getElementById('usernameInput');
-        usernameInput.value = this.username;
-        usernameInput.addEventListener('change', (e) => {
-            this.username = e.target.value.trim() || 'Usuario';
+        // Herramientas de dibujo
+        document.getElementById('colorPicker').addEventListener('input', (e) => {
+            this.currentColor = e.target.value;
         });
         
-        // Configurar envío de mensajes
-        const messageInput = document.getElementById('messageInput');
-        const sendButton = document.getElementById('sendMessageBtn');
+        document.getElementById('brushSize').addEventListener('input', (e) => {
+            this.currentLineWidth = e.target.value;
+            document.getElementById('brushSizeValue').textContent = `${e.target.value}px`;
+        });
         
-        const sendMessage = () => {
-            const text = messageInput.value.trim();
-            if (text && this.socket?.connected) {
-                this.sendChatMessage(text);
-                messageInput.value = '';
+        // Botón limpiar
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            if (confirm('¿Estás seguro de que quieres limpiar toda la pizarra?')) {
+                this.socket.emit('clear-canvas');
             }
-        };
+        });
         
-        sendButton.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
+        // Chat
+        document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                sendMessage();
+                this.sendMessage();
             }
         });
-    }
-    
-    initializeSocket() {
-        console.log('🔌 Iniciando conexión...');
-        this.showLoadingMessage('Conectando con la pizarra...');
         
-        try {
-            this.socket = io({
-                transports: ['websocket', 'polling'],
-                timeout: 10000,
-                reconnectionAttempts: this.maxReconnectionAttempts
-            });
-            
-            this.setupSocketEvents();
-            
-        } catch (error) {
-            console.error('💥 Error al inicializar Socket.io:', error);
-            this.showLoadingMessage('Error de conexión. Recarga la página.');
-        }
+        // Redimensionar canvas cuando cambia el tamaño de la ventana
+        window.addEventListener('resize', () => this.resizeCanvas());
     }
     
     setupSocketEvents() {
-        // Conexión establecida
+        // Eventos de dibujo
+        this.socket.on('draw', (data) => {
+            this.drawOnCanvas(data);
+        });
+        
+        this.socket.on('canvas-state', (state) => {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            state.forEach(data => this.drawOnCanvas(data));
+        });
+        
+        this.socket.on('clear-canvas', (data) => {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.addSystemMessage(`${data.username} limpió la pizarra`, data.timestamp);
+        });
+        
+        // Eventos de chat
+        this.socket.on('chat-message', (data) => {
+            this.addChatMessage(data);
+        });
+        
+        this.socket.on('user-joined', (data) => {
+            this.addSystemMessage(data.message, data.timestamp);
+        });
+        
+        this.socket.on('user-left', (data) => {
+            this.addSystemMessage(data.message, data.timestamp);
+        });
+        
+        this.socket.on('users-update', (data) => {
+            this.updateUserCount(data);
+        });
+        
+        // Manejo de reconexión
         this.socket.on('connect', () => {
-            console.log('✅ Conexión establecida con el servidor');
-            this.updateConnectionStatus(true);
-            this.hideLoadingMessage();
-            this.reconnectionAttempts = 0;
-        });
-        
-        // Desconexión
-        this.socket.on('disconnect', (reason) => {
-            console.log('❌ Desconectado:', reason);
-            this.updateConnectionStatus(false);
-            this.showLoadingMessage('Reconectando...');
-        });
-        
-        // Error de conexión
-        this.socket.on('connect_error', (error) => {
-            this.reconnectionAttempts++;
-            console.error(`💥 Error de conexión (intento ${this.reconnectionAttempts}):`, error);
-            
-            if (this.reconnectionAttempts <= this.maxReconnectionAttempts) {
-                this.showLoadingMessage(`Conectando... (${this.reconnectionAttempts}/${this.maxReconnectionAttempts})`);
-            } else {
-                this.showLoadingMessage('No se pudo conectar. Verifica tu conexión e intenta recargar.');
+            console.log('Conectado al servidor');
+            if (this.username) {
+                this.socket.emit('set-username', this.username);
             }
         });
         
-        // Reconexión exitosa
-        this.socket.on('reconnect', (attemptNumber) => {
-            console.log(`🔁 Reconectado después de ${attemptNumber} intentos`);
-            this.updateConnectionStatus(true);
-            this.hideLoadingMessage();
-        });
-        
-        // Estado del canvas al conectar
-        this.socket.on('canvas-state', (lines) => {
-            console.log(`📊 Canvas sincronizado: ${lines.length} elementos`);
-            this.redrawCanvas(lines);
-        });
-        
-        // Dibujos de otros usuarios
-        this.socket.on('draw', (lineData) => {
-            this.drawRemoteLine(lineData);
-        });
-        
-        // Canvas limpiado
-        this.socket.on('canvas-cleared', () => {
-            this.clearLocalCanvas();
-            console.log('🧹 Canvas limpiado por otro usuario');
-        });
-        
-        // Actualización de usuarios
-        this.socket.on('users-update', (userCount) => {
-            this.updateUserCount(userCount);
-        });
-        
-        // Mensajes de chat
-        this.socket.on('chat-message', (messageData) => {
-            this.displayChatMessage(messageData);
-        });
-        
-        // Usuario se unió
-        this.socket.on('user-joined', (message) => {
-            this.displaySystemMessage(message);
-        });
-        
-        // Usuario abandonó
-        this.socket.on('user-left', (message) => {
-            this.displaySystemMessage(message);
+        this.socket.on('disconnect', () => {
+            console.log('Desconectado del servidor');
         });
     }
     
-    // Métodos de dibujo (sin cambios)
-    startDrawing(e) {
-        if (!this.socket?.connected) {
-            this.showLoadingMessage('Esperando conexión...');
-            return;
+    resizeCanvas() {
+        const container = this.canvas.parentElement;
+        this.canvas.width = container.clientWidth - 4; // Restar bordes
+        this.canvas.height = container.clientHeight - 100; // Restar espacio de herramientas
+        
+        // Redibujar estado actual si existe
+        if (this.socket.connected) {
+            this.socket.emit('request-canvas-state');
         }
-        
+    }
+    
+    // Métodos de dibujo
+    startDrawing(e) {
         this.isDrawing = true;
-        const point = this.getCanvasCoordinates(e);
-        [this.lastX, this.lastY] = [point.x, point.y];
+        const pos = this.getMousePos(e);
+        [this.lastX, this.lastY] = [pos.x, pos.y];
         
-        this.currentLine = [{
-            x: point.x,
-            y: point.y,
+        // Emitir inicio del trazo
+        this.socket.emit('draw', {
+            x: this.lastX,
+            y: this.lastY,
+            type: 'start',
             color: this.currentColor,
-            width: this.brushSize
-        }];
+            lineWidth: this.currentLineWidth
+        });
     }
     
     draw(e) {
-        if (!this.isDrawing || !this.socket?.connected) return;
+        if (!this.isDrawing) return;
         
         e.preventDefault();
-        const point = this.getCanvasCoordinates(e);
+        const pos = this.getMousePos(e);
         
         this.ctx.beginPath();
         this.ctx.moveTo(this.lastX, this.lastY);
-        this.ctx.lineTo(point.x, point.y);
+        this.ctx.lineTo(pos.x, pos.y);
+        this.ctx.strokeStyle = this.currentColor;
+        this.ctx.lineWidth = this.currentLineWidth;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
         this.ctx.stroke();
         
-        [this.lastX, this.lastY] = [point.x, point.y];
-        
-        this.currentLine.push({
-            x: point.x,
-            y: point.y,
+        // Emitir punto de dibujo
+        this.socket.emit('draw', {
+            x: pos.x,
+            y: pos.y,
+            type: 'draw',
             color: this.currentColor,
-            width: this.brushSize
+            lineWidth: this.currentLineWidth
         });
+        
+        [this.lastX, this.lastY] = [pos.x, pos.y];
     }
     
     stopDrawing() {
-        if (!this.isDrawing) return;
-        
-        this.isDrawing = false;
-        
-        if (this.currentLine.length > 1 && this.socket?.connected) {
+        if (this.isDrawing) {
+            this.isDrawing = false;
+            
+            // Emitir fin del trazo
             this.socket.emit('draw', {
-                points: this.currentLine,
+                x: this.lastX,
+                y: this.lastY,
+                type: 'end',
                 color: this.currentColor,
-                width: this.brushSize
+                lineWidth: this.currentLineWidth
             });
         }
-        
-        this.currentLine = [];
     }
     
+    drawOnCanvas(data) {
+        if (data.type === 'start') {
+            this.ctx.beginPath();
+            this.ctx.moveTo(data.x, data.y);
+        } else if (data.type === 'draw') {
+            this.ctx.lineTo(data.x, data.y);
+            this.ctx.strokeStyle = data.userColor || data.color;
+            this.ctx.lineWidth = data.lineWidth;
+            this.ctx.lineCap = 'round';
+            this.ctx.lineJoin = 'round';
+            this.ctx.stroke();
+            this.ctx.beginPath();
+            this.ctx.moveTo(data.x, data.y);
+        }
+    }
+    
+    // Métodos táctiles
     handleTouchStart(e) {
         e.preventDefault();
-        this.startDrawing(e.touches[0]);
+        const touch = e.touches[0];
+        const mouseEvent = new MouseEvent('mousedown', {
+            clientX: touch.clientX,
+            clientY: touch.clientY
+        });
+        this.canvas.dispatchEvent(mouseEvent);
     }
     
     handleTouchMove(e) {
         e.preventDefault();
-        this.draw(e.touches[0]);
+        const touch = e.touches[0];
+        const mouseEvent = new MouseEvent('mousemove', {
+            clientX: touch.clientX,
+            clientY: touch.clientY
+        });
+        this.canvas.dispatchEvent(mouseEvent);
     }
     
-    getCanvasCoordinates(e) {
+    getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
-        const scaleX = this.canvas.width / rect.width;
-        const scaleY = this.canvas.height / rect.height;
+        let clientX, clientY;
+        
+        if (e.type.includes('touch')) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
         
         return {
-            x: (e.clientX - rect.left) * scaleX,
-            y: (e.clientY - rect.top) * scaleY
+            x: clientX - rect.left,
+            y: clientY - rect.top
         };
-    }
-    
-    handleColorChange(e) {
-        this.currentColor = e.target.value;
-        this.ctx.strokeStyle = this.currentColor;
-    }
-    
-    handleBrushSizeChange(e) {
-        this.brushSize = parseInt(e.target.value);
-        this.ctx.lineWidth = this.brushSize;
-        this.updateBrushSizeDisplay();
-    }
-    
-    handleClearCanvas() {
-        if (!this.socket?.connected) {
-            alert('No hay conexión con el servidor');
-            return;
-        }
-        
-        if (confirm('¿Estás seguro de que quieres limpiar toda la pizarra para todos los usuarios?')) {
-            this.clearLocalCanvas();
-            this.socket.emit('clear-canvas');
-        }
-    }
-    
-    clearLocalCanvas() {
-        this.ctx.fillStyle = 'white';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    }
-    
-    redrawCanvas(lines) {
-        this.clearLocalCanvas();
-        lines.forEach(lineData => {
-            this.drawRemoteLine(lineData);
-        });
-    }
-    
-    drawRemoteLine(lineData) {
-        if (!lineData.points || lineData.points.length < 2) return;
-        
-        const originalColor = this.ctx.strokeStyle;
-        const originalWidth = this.ctx.lineWidth;
-        
-        this.ctx.strokeStyle = lineData.color;
-        this.ctx.lineWidth = lineData.width;
-        
-        this.ctx.beginPath();
-        this.ctx.moveTo(lineData.points[0].x, lineData.points[0].y);
-        
-        for (let i = 1; i < lineData.points.length; i++) {
-            this.ctx.lineTo(lineData.points[i].x, lineData.points[i].y);
-        }
-        
-        this.ctx.stroke();
-        
-        this.ctx.strokeStyle = originalColor;
-        this.ctx.lineWidth = originalWidth;
     }
     
     // Métodos de chat
-    sendChatMessage(text) {
-        const messageData = {
-            text: text,
-            username: this.username,
-            timestamp: new Date().toISOString()
-        };
+    sendMessage() {
+        const messageInput = document.getElementById('messageInput');
+        const message = messageInput.value.trim();
         
-        this.socket.emit('chat-message', messageData);
-        
-        // Mostrar mensaje localmente inmediatamente
-        this.displayChatMessage({
-            ...messageData,
-            userId: this.socket.id,
-            isLocal: true
-        });
-    }
-    
-    displayChatMessage(messageData) {
-        const chatMessages = document.getElementById('chatMessages');
-        const messageElement = document.createElement('div');
-        
-        const isOwnMessage = messageData.userId === this.socket.id || messageData.isLocal;
-        const messageClass = isOwnMessage ? 'message message-user' : 'message message-other';
-        
-        const time = new Date(messageData.timestamp).toLocaleTimeString('es-ES', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-        
-        messageElement.className = messageClass;
-        messageElement.innerHTML = `
-            <div class="message-header">
-                <span class="message-username">${this.escapeHtml(messageData.username)}</span>
-                <span class="message-time">${time}</span>
-            </div>
-            <div class="message-text">${this.escapeHtml(messageData.text)}</div>
-        `;
-        
-        chatMessages.appendChild(messageElement);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-        
-        // Limitar número de mensajes para evitar sobrecarga
-        const messages = chatMessages.querySelectorAll('.message');
-        if (messages.length > 100) {
-            messages[0].remove();
+        if (message && this.username) {
+            this.socket.emit('chat-message', { message });
+            messageInput.value = '';
         }
     }
     
-    displaySystemMessage(text) {
+    addChatMessage(data) {
         const chatMessages = document.getElementById('chatMessages');
-        const messageElement = document.createElement('div');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message';
         
-        messageElement.className = 'message message-system';
-        messageElement.textContent = text;
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <span class="username" style="color: ${data.color}">${data.username}</span>
+                <span class="timestamp">${data.timestamp}</span>
+            </div>
+            <div class="message-content">${this.escapeHtml(data.message)}</div>
+        `;
         
-        chatMessages.appendChild(messageElement);
+        chatMessages.appendChild(messageDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    addSystemMessage(message, timestamp) {
+        const chatMessages = document.getElementById('chatMessages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message system';
+        
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <span class="username">Sistema</span>
+                <span class="timestamp">${timestamp}</span>
+            </div>
+            <div class="message-content">${this.escapeHtml(message)}</div>
+        `;
+        
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    updateUserCount(data) {
+        document.getElementById('userCount').textContent = 
+            `${data.count} usuario${data.count !== 1 ? 's' : ''} conectado${data.count !== 1 ? 's' : ''}`;
+        
+        const onlineUsers = document.getElementById('onlineUsers');
+        onlineUsers.innerHTML = data.users.map(user => 
+            `<span style="color: ${user.color}">${user.username}</span>`
+        ).join(', ');
+    }
+    
+    focusMessageInput() {
+        document.getElementById('messageInput').focus();
     }
     
     escapeHtml(text) {
@@ -388,51 +313,9 @@ class PizarraColaborativa {
         div.textContent = text;
         return div.innerHTML;
     }
-    
-    // Métodos de UI
-    updateBrushSizeDisplay() {
-        document.getElementById('brushSizeValue').textContent = `${this.brushSize}px`;
-    }
-    
-    updateUserCount(count) {
-        document.getElementById('usersCount').textContent = count;
-        document.getElementById('chatUsersCount').textContent = count;
-    }
-    
-    updateConnectionStatus(connected) {
-        const statusElement = document.getElementById('connectionStatus');
-        if (connected) {
-            statusElement.textContent = '● Conectado';
-            statusElement.className = 'status-connected';
-        } else {
-            statusElement.textContent = '● Desconectado';
-            statusElement.className = 'status-disconnected';
-        }
-    }
-    
-    showLoadingMessage(message = 'Conectando...') {
-        const loadingElement = document.getElementById('loadingMessage');
-        loadingElement.classList.remove('hidden');
-        loadingElement.querySelector('p').textContent = message;
-    }
-    
-    hideLoadingMessage() {
-        document.getElementById('loadingMessage').classList.add('hidden');
-    }
-    
-    handleResize() {
-        setTimeout(() => {
-            this.setupCanvas();
-        }, 250);
-    }
 }
 
-// Inicializar la aplicación
+// Inicializar la aplicación cuando se carga la página
 document.addEventListener('DOMContentLoaded', () => {
-    window.pizarra = new PizarraColaborativa(); // ← Hacerla global
-});
-
-// Manejar errores globales
-window.addEventListener('error', (e) => {
-    console.error('Error global:', e.error);
+    new CollaborativeWhiteboard();
 });
