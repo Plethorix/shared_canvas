@@ -5,138 +5,142 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+const io = socketIo(server);
 
-// Configuración de Socket.io para producción
-const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  },
-  transports: ['websocket', 'polling']
-});
-
-const PORT = process.env.PORT || 3000;
-
-// Middleware para archivos estáticos
+// Servir archivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Health check endpoint para Render
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
-    message: 'Servidor de pizarra colaborativa funcionando',
-    timestamp: new Date().toISOString(),
-    users: canvasState.users
-  });
-});
+// Estado en memoria
+let canvasState = [];
+let users = new Map();
+let userCount = 0;
 
-// Ruta principal
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Estado del canvas en memoria
-let canvasState = {
-  lines: [],
-  users: 0
-};
-
-// No almacenamos mensajes del chat en el servidor
-let connectedUsers = new Map();
-
-// Manejo de conexiones Socket.io
+// Configuración de Socket.io
 io.on('connection', (socket) => {
-  console.log(`✅ Nueva conexión: ${socket.id}`);
-  
-  canvasState.users++;
-  connectedUsers.set(socket.id, { id: socket.id, connectedAt: new Date() });
-  
-  console.log(`👥 Usuarios conectados: ${canvasState.users}`);
-  
-  // Enviar estado actual al nuevo usuario
-  socket.emit('canvas-state', canvasState.lines);
-  
-  // Actualizar contador para todos
-  io.emit('users-update', canvasState.users);
-  
-  // Notificar a todos que un nuevo usuario se unió
-  socket.broadcast.emit('user-joined', `Usuario ${canvasState.users} se unió a la pizarra`);
-  
-  // Manejar dibujo
-  socket.on('draw', (lineData) => {
-    if (validateLineData(lineData)) {
-      canvasState.lines.push(lineData);
-      socket.broadcast.emit('draw', lineData);
-    }
-  });
-  
-  // Manejar limpieza
-  socket.on('clear-canvas', () => {
-    canvasState.lines = [];
-    io.emit('canvas-cleared');
-    console.log(`🧹 Canvas limpiado por ${socket.id}`);
-  });
-  
-  // Manejar mensajes de chat
-  socket.on('chat-message', (messageData) => {
-    // Validar mensaje
-    if (validateMessageData(messageData)) {
-      // Transmitir mensaje a todos los usuarios incluyendo el emisor
-      io.emit('chat-message', {
-        ...messageData,
-        timestamp: new Date().toISOString(),
-        userId: socket.id
-      });
-    }
-  });
-  
-  // Manejar ping/pong para mantener conexión
-  socket.on('ping', () => {
-    socket.emit('pong');
-  });
-  
-  // Manejar desconexión
-  socket.on('disconnect', () => {
-    console.log(`❌ Desconexión: ${socket.id}`);
-    canvasState.users = Math.max(0, canvasState.users - 1);
-    connectedUsers.delete(socket.id);
+    console.log('Nuevo usuario conectado:', socket.id);
     
-    io.emit('users-update', canvasState.users);
-    socket.broadcast.emit('user-left', `Un usuario abandonó la pizarra`);
-  });
+    // Evento cuando un usuario establece su nombre
+    socket.on('set-username', (username) => {
+        if (users.has(socket.id)) {
+            return;
+        }
+        
+        // Asignar color único al usuario
+        const userColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8'];
+        const userColor = userColors[userCount % userColors.length];
+        
+        users.set(socket.id, {
+            username: username,
+            color: userColor,
+            id: socket.id
+        });
+        userCount++;
+        
+        // Enviir estado actual del canvas al nuevo usuario
+        socket.emit('canvas-state', canvasState);
+        
+        // Notificar a todos los usuarios sobre el nuevo usuario
+        socket.broadcast.emit('user-joined', {
+            username: username,
+            message: `${username} se ha unido a la pizarra`,
+            timestamp: new Date().toLocaleTimeString()
+        });
+        
+        // Actualizar contador de usuarios para todos
+        io.emit('users-update', {
+            count: users.size,
+            users: Array.from(users.values()).map(user => ({
+                username: user.username,
+                color: user.color
+            }))
+        });
+        
+        console.log(`Usuario ${username} (${socket.id}) se ha unido`);
+    });
+    
+    // Manejar eventos de dibujo
+    socket.on('draw', (data) => {
+        // Validar datos
+        if (isValidDrawData(data)) {
+            // Agregar información del usuario
+            const user = users.get(socket.id);
+            if (user) {
+                data.userColor = user.color;
+                data.username = user.username;
+            }
+            
+            canvasState.push(data);
+            socket.broadcast.emit('draw', data);
+        }
+    });
+    
+    // Limpiar canvas
+    socket.on('clear-canvas', () => {
+        canvasState = [];
+        const user = users.get(socket.id);
+        io.emit('clear-canvas', {
+            username: user ? user.username : 'Anónimo',
+            timestamp: new Date().toLocaleTimeString()
+        });
+    });
+    
+    // Mensajes de chat
+    socket.on('chat-message', (messageData) => {
+        const user = users.get(socket.id);
+        if (user && messageData.message && messageData.message.trim() !== '') {
+            const chatData = {
+                username: user.username,
+                message: messageData.message.trim(),
+                color: user.color,
+                timestamp: new Date().toLocaleTimeString(),
+                type: 'message'
+            };
+            io.emit('chat-message', chatData);
+        }
+    });
+    
+    // Manejar desconexión
+    socket.on('disconnect', () => {
+        const user = users.get(socket.id);
+        if (user) {
+            users.delete(socket.id);
+            
+            // Notificar a los demás usuarios
+            socket.broadcast.emit('user-left', {
+                username: user.username,
+                message: `${user.username} ha abandonado la pizarra`,
+                timestamp: new Date().toLocaleTimeString()
+            });
+            
+            // Actualizar contador de usuarios
+            io.emit('users-update', {
+                count: users.size,
+                users: Array.from(users.values()).map(u => ({
+                    username: u.username,
+                    color: u.color
+                }))
+            });
+            
+            console.log(`Usuario ${user.username} (${socket.id}) se ha desconectado`);
+        }
+    });
 });
 
 // Validación de datos de dibujo
-function validateLineData(lineData) {
-  return lineData && 
-         Array.isArray(lineData.points) &&
-         typeof lineData.color === 'string' &&
-         typeof lineData.width === 'number' &&
-         lineData.points.length >= 2;
+function isValidDrawData(data) {
+    return (
+        data &&
+        typeof data.x === 'number' &&
+        typeof data.y === 'number' &&
+        typeof data.type === 'string' &&
+        ['start', 'draw', 'end'].includes(data.type) &&
+        typeof data.color === 'string' &&
+        typeof data.lineWidth === 'number'
+    );
 }
 
-// Validación de datos de mensaje
-function validateMessageData(messageData) {
-  return messageData && 
-         typeof messageData.text === 'string' &&
-         messageData.text.trim().length > 0 &&
-         messageData.text.length <= 500 && // Límite de caracteres
-         typeof messageData.username === 'string' &&
-         messageData.username.trim().length > 0;
-}
-
-// Iniciar servidor
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor de pizarra colaborativa con chat iniciado`);
-  console.log(`📍 Puerto: ${PORT}`);
-  console.log(`🌐 Modo: ${process.env.NODE_ENV || 'development'}`);
-});
-
-// Manejo graceful de shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 Recibida señal de terminación');
-  server.close(() => {
-    console.log('✅ Servidor cerrado correctamente');
-    process.exit(0);
-  });
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Servidor ejecutándose en puerto ${PORT}`);
+    console.log(`Accede a: http://localhost:${PORT}`);
 });
