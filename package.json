@@ -1,7 +1,7 @@
 {
   "name": "pizarra-colaborativa",
   "version": "1.0.0",
-  "description": "Pizarra colaborativa en tiempo real para Render",
+  "description": "Pizarra colaborativa en tiempo real con chat",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,7 +11,10 @@
     "express": "^4.18.2",
     "socket.io": "^4.7.2"
   },
-  "keywords": ["canvas", "collaborative", "realtime", "socket.io"],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["canvas", "collaborative", "realtime", "chat", "socket.io"],
   "author": "Tu Nombre",
   "license": "MIT"
 }
