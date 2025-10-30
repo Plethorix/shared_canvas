@@ -15,6 +15,6 @@
     "node": ">=18.0.0"
   },
   "keywords": ["canvas", "collaborative", "realtime", "chat", "socket.io"],
-  "author": "Tu Nombre",
+  "author": "Plethorix",
   "license": "MIT"
 }
