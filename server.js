@@ -7,7 +7,6 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
-// Servir archivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Estado en memoria
@@ -15,17 +14,14 @@ let canvasState = [];
 let users = new Map();
 let userCount = 0;
 
-// Configuración de Socket.io
 io.on('connection', (socket) => {
     console.log('Nuevo usuario conectado:', socket.id);
     
-    // Evento cuando un usuario establece su nombre
     socket.on('set-username', (username) => {
         if (users.has(socket.id)) {
             return;
         }
         
-        // Asignar color único al usuario
         const userColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8'];
         const userColor = userColors[userCount % userColors.length];
         
@@ -36,17 +32,15 @@ io.on('connection', (socket) => {
         });
         userCount++;
         
-        // Enviar estado actual del canvas al nuevo usuario
+        // Enviar estado actual del canvas
         socket.emit('canvas-state', canvasState);
         
-        // Notificar a todos los usuarios sobre el nuevo usuario
         socket.broadcast.emit('user-joined', {
             username: username,
             message: `${username} se ha unido a la pizarra`,
             timestamp: new Date().toLocaleTimeString()
         });
         
-        // Actualizar contador de usuarios para todos
         io.emit('users-update', {
             count: users.size,
             users: Array.from(users.values()).map(user => ({
@@ -54,28 +48,56 @@ io.on('connection', (socket) => {
                 color: user.color
             }))
         });
-        
-        console.log(`Usuario ${username} (${socket.id}) se ha unido`);
     });
     
-    // Manejar eventos de dibujo - CORREGIDO PARA MANTENER COLORES
-    socket.on('draw', (data) => {
-        // Validar datos
-        if (isValidDrawData(data)) {
-            // 🔥 CORRECCIÓN: Preservar el color original del dibujo
-            const user = users.get(socket.id);
-            if (user) {
-                data.originalColor = data.color; // Guardar color original
-                data.username = user.username;
-            }
+    // 🔥 CORRECCIÓN COMPLETA: Manejar trazos completos
+    socket.on('draw-start', (data) => {
+        const user = users.get(socket.id);
+        if (user) {
+            // Crear un nuevo trazo con color original
+            const stroke = {
+                points: [{ x: data.x, y: data.y }],
+                color: data.color, // Color original del dibujo
+                lineWidth: data.lineWidth,
+                username: user.username,
+                userId: socket.id,
+                id: Date.now() + Math.random() // ID único para el trazo
+            };
+            canvasState.push(stroke);
             
-            canvasState.push(data);
-            // Enviar a todos los demás clientes manteniendo el color original
-            socket.broadcast.emit('draw', data);
+            // Enviar a otros usuarios
+            socket.broadcast.emit('draw-start', stroke);
         }
     });
     
-    // Limpiar canvas
+    socket.on('draw-move', (data) => {
+        const user = users.get(socket.id);
+        if (user) {
+            // Buscar el último trazo de este usuario
+            const lastStroke = canvasState
+                .filter(stroke => stroke.userId === socket.id)
+                .pop();
+            
+            if (lastStroke) {
+                // Agregar punto al trazo existente
+                lastStroke.points.push({ x: data.x, y: data.y });
+                
+                // Enviar a otros usuarios
+                socket.broadcast.emit('draw-move', {
+                    strokeId: lastStroke.id,
+                    point: { x: data.x, y: data.y },
+                    color: lastStroke.color, // Mantener color original
+                    lineWidth: lastStroke.lineWidth
+                });
+            }
+        }
+    });
+    
+    socket.on('draw-end', () => {
+        // No necesitamos hacer nada especial al terminar
+        console.log('Trazo completado');
+    });
+    
     socket.on('clear-canvas', () => {
         canvasState = [];
         const user = users.get(socket.id);
@@ -85,7 +107,6 @@ io.on('connection', (socket) => {
         });
     });
     
-    // Mensajes de chat
     socket.on('chat-message', (messageData) => {
         const user = users.get(socket.id);
         if (user && messageData.message && messageData.message.trim() !== '') {
@@ -100,20 +121,17 @@ io.on('connection', (socket) => {
         }
     });
     
-    // Manejar desconexión
     socket.on('disconnect', () => {
         const user = users.get(socket.id);
         if (user) {
             users.delete(socket.id);
             
-            // Notificar a los demás usuarios
             socket.broadcast.emit('user-left', {
                 username: user.username,
                 message: `${user.username} ha abandonado la pizarra`,
                 timestamp: new Date().toLocaleTimeString()
             });
             
-            // Actualizar contador de usuarios
             io.emit('users-update', {
                 count: users.size,
                 users: Array.from(users.values()).map(u => ({
@@ -121,33 +139,11 @@ io.on('connection', (socket) => {
                     color: u.color
                 }))
             });
-            
-            console.log(`Usuario ${user.username} (${socket.id}) se ha desconectado`);
         }
     });
 });
 
-// Validación de datos de dibujo
-function isValidDrawData(data) {
-    return (
-        data &&
-        typeof data.x === 'number' &&
-        typeof data.y === 'number' &&
-        typeof data.type === 'string' &&
-        ['start', 'draw', 'end'].includes(data.type) &&
-        typeof data.color === 'string' &&
-        typeof data.lineWidth === 'number'
-    );
-}
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Servidor ejecutándose en puerto ${PORT}`);
-    console.log(`Accede a: http://localhost:${PORT}`);
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Servidor ejecutándose en puerto ${PORT}`);
-    console.log(`Accede a: http://localhost:${PORT}`);
 });
