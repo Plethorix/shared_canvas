@@ -429,7 +429,7 @@ class PizarraColaborativa {
 
 // Inicializar la aplicación
 document.addEventListener('DOMContentLoaded', () => {
-    new PizarraColaborativa();
+    window.pizarra = new PizarraColaborativa(); // ← Hacerla global
 });
 
 // Manejar errores globales
