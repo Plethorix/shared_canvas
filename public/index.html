@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pizarra Colaborativa 🎨</title>
-    <meta name="description" content="Pizarra colaborativa en tiempo real para dibujar con múltiples usuarios">
+    <title>Pizarra Colaborativa 🎨 + 💬</title>
+    <meta name="description" content="Pizarra colaborativa en tiempo real con chat para múltiples usuarios">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,6 +15,7 @@
                 <h1 class="app-title">
                     <span class="icon">🎨</span>
                     Pizarra Colaborativa
+                    <span class="chat-icon">💬</span>
                 </h1>
                 
                 <div class="controls-panel">
@@ -47,12 +48,47 @@
             </div>
         </header>
 
-        <!-- Área principal del canvas -->
-        <main class="canvas-container">
-            <canvas id="pizarra"></canvas>
-            <div id="loadingMessage" class="loading-message">
-                <div class="spinner"></div>
-                <p>Conectando a la pizarra...</p>
+        <!-- Área principal con pizarra y chat -->
+        <main class="main-content">
+            <div class="canvas-section">
+                <div class="canvas-container">
+                    <canvas id="pizarra"></canvas>
+                    <div id="loadingMessage" class="loading-message">
+                        <div class="spinner"></div>
+                        <p>Conectando a la pizarra...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sección del chat -->
+            <div class="chat-section">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3>Chat en Vivo</h3>
+                        <div class="online-indicator">
+                            <span class="indicator-dot"></span>
+                            <span id="chatUsersCount">0</span> en línea
+                        </div>
+                    </div>
+                    
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="system-message">
+                            💡 Bienvenido al chat. Escribe un mensaje para comenzar!
+                        </div>
+                    </div>
+                    
+                    <div class="chat-input-container">
+                        <div class="username-input">
+                            <input type="text" id="usernameInput" placeholder="Tu nombre" maxlength="20" value="Usuario">
+                        </div>
+                        <div class="message-input">
+                            <input type="text" id="messageInput" placeholder="Escribe tu mensaje..." maxlength="500">
+                            <button id="sendMessageBtn" class="btn btn-send">
+                                <span class="send-icon">📤</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
 
@@ -60,7 +96,7 @@
         <footer class="app-footer">
             <div class="footer-content">
                 <p class="footer-text">
-                    💡 <strong>Consejo:</strong> Dibuja y colabora en tiempo real con otros usuarios
+                    💡 <strong>Consejo:</strong> Dibuja y chatea en tiempo real con otros usuarios
                 </p>
                 <div class="connection-status">
                     <span id="connectionStatus" class="status-connected">● Conectado</span>
