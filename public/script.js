@@ -1,6 +1,6 @@
 /**
- * Pizarra Colaborativa - Cliente
- * Versión optimizada para producción
+ * Pizarra Colaborativa con Chat
+ * Versión completa con funcionalidades de dibujo y chat
  */
 class PizarraColaborativa {
     constructor() {
@@ -15,6 +15,7 @@ class PizarraColaborativa {
         this.currentLine = [];
         this.reconnectionAttempts = 0;
         this.maxReconnectionAttempts = 10;
+        this.username = 'Usuario';
         
         this.initializeApp();
     }
@@ -24,8 +25,9 @@ class PizarraColaborativa {
         this.setupEventListeners();
         this.initializeSocket();
         this.setupUIUpdates();
+        this.setupChat();
         
-        console.log('🎨 Aplicación de pizarra colaborativa inicializada');
+        console.log('🎨💬 Pizarra colaborativa con chat inicializada');
     }
     
     setupCanvas() {
@@ -47,18 +49,18 @@ class PizarraColaborativa {
     }
     
     setupEventListeners() {
-        // Eventos de mouse
+        // Eventos de mouse para dibujo
         this.canvas.addEventListener('mousedown', this.startDrawing.bind(this));
         this.canvas.addEventListener('mousemove', this.draw.bind(this));
         this.canvas.addEventListener('mouseup', this.stopDrawing.bind(this));
         this.canvas.addEventListener('mouseout', this.stopDrawing.bind(this));
         
-        // Eventos táctiles
+        // Eventos táctiles para dibujo
         this.canvas.addEventListener('touchstart', this.handleTouchStart.bind(this));
         this.canvas.addEventListener('touchmove', this.handleTouchMove.bind(this));
         this.canvas.addEventListener('touchend', this.stopDrawing.bind(this));
         
-        // Controles de interfaz
+        // Controles de dibujo
         document.getElementById('colorPicker').addEventListener('input', this.handleColorChange.bind(this));
         document.getElementById('brushSize').addEventListener('input', this.handleBrushSizeChange.bind(this));
         document.getElementById('clearBtn').addEventListener('click', this.handleClearCanvas.bind(this));
@@ -67,12 +69,39 @@ class PizarraColaborativa {
         window.addEventListener('resize', this.handleResize.bind(this));
     }
     
+    setupChat() {
+        // Configurar nombre de usuario
+        const usernameInput = document.getElementById('usernameInput');
+        usernameInput.value = this.username;
+        usernameInput.addEventListener('change', (e) => {
+            this.username = e.target.value.trim() || 'Usuario';
+        });
+        
+        // Configurar envío de mensajes
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendMessageBtn');
+        
+        const sendMessage = () => {
+            const text = messageInput.value.trim();
+            if (text && this.socket?.connected) {
+                this.sendChatMessage(text);
+                messageInput.value = '';
+            }
+        };
+        
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    }
+    
     initializeSocket() {
         console.log('🔌 Iniciando conexión...');
         this.showLoadingMessage('Conectando con la pizarra...');
         
         try {
-            // Socket.io se conecta automáticamente al mismo host
             this.socket = io({
                 transports: ['websocket', 'polling'],
                 timeout: 10000,
@@ -143,8 +172,24 @@ class PizarraColaborativa {
         this.socket.on('users-update', (userCount) => {
             this.updateUserCount(userCount);
         });
+        
+        // Mensajes de chat
+        this.socket.on('chat-message', (messageData) => {
+            this.displayChatMessage(messageData);
+        });
+        
+        // Usuario se unió
+        this.socket.on('user-joined', (message) => {
+            this.displaySystemMessage(message);
+        });
+        
+        // Usuario abandonó
+        this.socket.on('user-left', (message) => {
+            this.displaySystemMessage(message);
+        });
     }
     
+    // Métodos de dibujo (sin cambios)
     startDrawing(e) {
         if (!this.socket?.connected) {
             this.showLoadingMessage('Esperando conexión...');
@@ -169,7 +214,6 @@ class PizarraColaborativa {
         e.preventDefault();
         const point = this.getCanvasCoordinates(e);
         
-        // Dibujar localmente
         this.ctx.beginPath();
         this.ctx.moveTo(this.lastX, this.lastY);
         this.ctx.lineTo(point.x, point.y);
@@ -190,7 +234,6 @@ class PizarraColaborativa {
         
         this.isDrawing = false;
         
-        // Enviar línea al servidor si tiene suficientes puntos
         if (this.currentLine.length > 1 && this.socket?.connected) {
             this.socket.emit('draw', {
                 points: this.currentLine,
@@ -253,7 +296,6 @@ class PizarraColaborativa {
     
     redrawCanvas(lines) {
         this.clearLocalCanvas();
-        
         lines.forEach(lineData => {
             this.drawRemoteLine(lineData);
         });
@@ -277,17 +319,84 @@ class PizarraColaborativa {
         
         this.ctx.stroke();
         
-        // Restaurar configuración original
         this.ctx.strokeStyle = originalColor;
         this.ctx.lineWidth = originalWidth;
     }
     
+    // Métodos de chat
+    sendChatMessage(text) {
+        const messageData = {
+            text: text,
+            username: this.username,
+            timestamp: new Date().toISOString()
+        };
+        
+        this.socket.emit('chat-message', messageData);
+        
+        // Mostrar mensaje localmente inmediatamente
+        this.displayChatMessage({
+            ...messageData,
+            userId: this.socket.id,
+            isLocal: true
+        });
+    }
+    
+    displayChatMessage(messageData) {
+        const chatMessages = document.getElementById('chatMessages');
+        const messageElement = document.createElement('div');
+        
+        const isOwnMessage = messageData.userId === this.socket.id || messageData.isLocal;
+        const messageClass = isOwnMessage ? 'message message-user' : 'message message-other';
+        
+        const time = new Date(messageData.timestamp).toLocaleTimeString('es-ES', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        messageElement.className = messageClass;
+        messageElement.innerHTML = `
+            <div class="message-header">
+                <span class="message-username">${this.escapeHtml(messageData.username)}</span>
+                <span class="message-time">${time}</span>
+            </div>
+            <div class="message-text">${this.escapeHtml(messageData.text)}</div>
+        `;
+        
+        chatMessages.appendChild(messageElement);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        // Limitar número de mensajes para evitar sobrecarga
+        const messages = chatMessages.querySelectorAll('.message');
+        if (messages.length > 100) {
+            messages[0].remove();
+        }
+    }
+    
+    displaySystemMessage(text) {
+        const chatMessages = document.getElementById('chatMessages');
+        const messageElement = document.createElement('div');
+        
+        messageElement.className = 'message message-system';
+        messageElement.textContent = text;
+        
+        chatMessages.appendChild(messageElement);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Métodos de UI
     updateBrushSizeDisplay() {
         document.getElementById('brushSizeValue').textContent = `${this.brushSize}px`;
     }
     
     updateUserCount(count) {
         document.getElementById('usersCount').textContent = count;
+        document.getElementById('chatUsersCount').textContent = count;
     }
     
     updateConnectionStatus(connected) {
@@ -314,15 +423,11 @@ class PizarraColaborativa {
     handleResize() {
         setTimeout(() => {
             this.setupCanvas();
-            // Volver a dibujar el estado actual si es necesario
-            if (this.socket?.connected) {
-                this.socket.emit('request-canvas-state');
-            }
         }, 250);
     }
 }
 
-// Inicializar la aplicación cuando el DOM esté listo
+// Inicializar la aplicación
 document.addEventListener('DOMContentLoaded', () => {
     new PizarraColaborativa();
 });
